@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { depthClass, magnitudeClass, type Briefing, type BriefingResponse, type QuakeEvent } from '../../../shared/types';
 import { getConfig } from '../config';
 import { HttpError } from '../errors';
-import { log } from '../logger';
+import { chatCompletion, extractJson, type ChatMessage } from './openrouter';
 
 const list = z.array(z.string().min(1).max(500)).max(6);
 export const ModelBriefingSchema = z.object({
@@ -68,14 +68,8 @@ export function buildMessages(e: QuakeEvent) {
 
 /** Safely turn raw model text into a validated object. Throws HttpError(502) when unusable. */
 export function parseModelOutput(raw: string): ModelBriefing {
-  let text = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  if (!text.startsWith('{')) {
-    const a = text.indexOf('{');
-    const b = text.lastIndexOf('}');
-    if (a !== -1 && b > a) text = text.slice(a, b + 1);
-  }
   try {
-    return ModelBriefingSchema.parse(JSON.parse(text));
+    return ModelBriefingSchema.parse(extractJson(raw));
   } catch {
     throw new HttpError(502, 'bad_model_output', 'The AI model returned an unusable response. Please try again.');
   }
@@ -86,41 +80,11 @@ export const __resetBriefingCache = () => briefingCache.clear();
 
 export async function generateBriefing(e: QuakeEvent, opts: { fetchImpl?: typeof fetch } = {}): Promise<BriefingResponse> {
   const cfg = getConfig();
-  if (!cfg.openrouter.apiKey) {
-    throw new HttpError(503, 'ai_not_configured', 'AI briefings need an OpenRouter API key. Set OPENROUTER_API_KEY in .env and restart the server.');
-  }
   const key = `${e.id}:${e.updated ?? 0}:${cfg.openrouter.model}`;
   const hit = briefingCache.get(key);
-  if (hit) return { ...hit, meta: { ...hit.meta, cached: true } };
+  if (hit && cfg.openrouter.apiKey) return { ...hit, meta: { ...hit.meta, cached: true } };
 
-  const f = opts.fetchImpl ?? fetch;
-  let res: Response;
-  try {
-    res = await f('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${cfg.openrouter.apiKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': cfg.clientUrl, 'X-Title': 'IMPACT' },
-      body: JSON.stringify({ model: cfg.openrouter.model, messages: buildMessages(e), temperature: 0.2, max_tokens: 900 }),
-      signal: AbortSignal.timeout(cfg.openrouter.timeoutMs),
-    });
-  } catch (err) {
-    const timeout = (err as Error).name === 'TimeoutError' || (err as Error).name === 'AbortError';
-    log('warn', 'openrouter_request_failed', { reason: (err as Error).name });
-    throw new HttpError(timeout ? 504 : 502, timeout ? 'ai_timeout' : 'ai_unreachable', timeout ? 'The AI model took too long to respond. Try again.' : 'Could not reach OpenRouter. Check your connection and try again.');
-  }
-  if (res.status === 401 || res.status === 403) throw new HttpError(502, 'ai_auth_failed', 'OpenRouter rejected the API key. Check OPENROUTER_API_KEY.');
-  if (res.status === 429) throw new HttpError(429, 'ai_rate_limited', 'OpenRouter rate limit reached. Wait a moment and retry.');
-  if (!res.ok) {
-    log('warn', 'openrouter_bad_status', { status: res.status, model: cfg.openrouter.model });
-    throw new HttpError(502, 'ai_upstream_error', `OpenRouter returned an error (${res.status}). The configured model may be unavailable - check OPENROUTER_MODEL.`);
-  }
-  let content: unknown;
-  try {
-    const json = (await res.json()) as { choices?: { message?: { content?: unknown } }[] };
-    content = json.choices?.[0]?.message?.content;
-  } catch {
-    throw new HttpError(502, 'bad_model_output', 'The AI model returned an unusable response. Please try again.');
-  }
-  if (typeof content !== 'string') throw new HttpError(502, 'bad_model_output', 'The AI model returned an empty response. Please try again.');
+  const { content } = await chatCompletion(buildMessages(e) as ChatMessage[], { maxTokens: 900, fetchImpl: opts.fetchImpl });
   const m = parseModelOutput(content);
   const briefing: Briefing = {
     eventId: e.id, facts: buildFacts(e), overview: m.overview,

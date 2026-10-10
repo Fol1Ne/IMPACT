@@ -6,4 +6,6 @@ const make = (max: number) => rateLimit({
 });
 export const aiLimiter = make(10);
 export const checkoutLimiter = make(10);
+export const newsLimiter = make(30);
+export const smsLimiter = make(5);
 export const generalLimiter = make(120);

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowDown, ExternalLink, MapPin, Sparkles, X, Clock, Activity, ChevronRight } from 'lucide-react';
-import { BAND_COLORS, depthClass, magnitudeBand, magnitudeClass, type HealthResponse, type QuakeEvent } from '@shared/types';
-import { formatCoords, formatUtc } from '../lib/format';
+import { BAND_COLORS, depthClass, magnitudeBand, magnitudeClass, type HazardEvent, type HealthResponse, type QuakeEvent } from '@shared/types';
+import { formatCoords, formatLocal } from '../lib/format';
 import BriefingPanel from './BriefingPanel';
+import { SourceRecords } from './HazardDetail';
 import PreparednessPanel from './PreparednessPanel';
 import ResourcesPanel from './ResourcesPanel';
 
@@ -12,9 +13,9 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'resources', label: 'Resources' }, { id: 'preparedness', label: 'Preparedness' },
 ];
 
-interface Props { event: QuakeEvent; health: HealthResponse | null; healthError: string | null; initialTab?: Tab; onClose: () => void }
+interface Props { event: QuakeEvent; hazard?: HazardEvent; health: HealthResponse | null; healthError: string | null; initialTab?: Tab; onClose: () => void }
 
-export default function EventDetail({ event, health, healthError, initialTab = 'overview', onClose }: Props) {
+export default function EventDetail({ event, hazard, health, healthError, initialTab = 'overview', onClose }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const first = useRef(true);
   useEffect(() => { if (first.current) { first.current = false; return; } setTab('overview'); }, [event.id]);
@@ -32,7 +33,7 @@ export default function EventDetail({ event, health, healthError, initialTab = '
       <dl className="stats">
         <div><dt><Activity size={14} aria-hidden="true" /> Magnitude</dt><dd>{event.magnitude === null ? 'n/a' : event.magnitude.toFixed(1)}<small>{magnitudeClass(event.magnitude)}</small></dd></div>
         <div><dt><ArrowDown size={14} aria-hidden="true" /> Depth</dt><dd>{event.depthKm === null ? 'n/a' : `${event.depthKm.toFixed(0)} km`}<small>{dc ?? 'not reported'}</small></dd></div>
-        <div><dt><Clock size={14} aria-hidden="true" /> Time</dt><dd className="time">{formatUtc(event.time)}</dd></div>
+        <div><dt><Clock size={14} aria-hidden="true" /> Time</dt><dd className="time">{formatLocal(event.time)}</dd></div>
       </dl>
       <p className="loc"><MapPin size={14} aria-hidden="true" /> <span className="mono">{formatCoords(event.latitude, event.longitude)}</span></p>
       <p className="src">Source: {event.url
@@ -66,6 +67,7 @@ export default function EventDetail({ event, health, healthError, initialTab = '
             <li>Injuries or casualties</li><li>Damage to buildings or infrastructure</li><li>Number of people affected</li><li>Whether any relief organisation is responding</li>
           </ul>
           <p className="muted small">The USGS feed does not include these details. Marker colour reflects magnitude only, not humanitarian impact.</p>
+          {hazard && <SourceRecords sources={hazard.sources} match={hazard.match} quake />}
         </section>
         <section role="tabpanel" id="pane-briefing" aria-labelledby="tab-briefing" hidden={tab !== 'briefing'}><BriefingPanel key={event.id} event={event} health={health} /></section>
         <section role="tabpanel" id="pane-resources" aria-labelledby="tab-resources" hidden={tab !== 'resources'}><ResourcesPanel event={event} /></section>

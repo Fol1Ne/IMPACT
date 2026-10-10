@@ -1,16 +1,25 @@
+import type { ReactNode } from 'react';
 import { Info, RefreshCw, Search } from 'lucide-react';
-import type { EventsMeta } from '@shared/types';
+import { PROVIDERS, type HazardsResponse } from '@shared/types';
 import { relativeTime } from '../lib/format';
 
-interface Props { meta: EventsMeta | null; loading: boolean; error: string | null; query: string; onQuery: (q: string) => void; onRefresh: () => void; onAbout: () => void }
+interface Props {
+  meta: HazardsResponse['meta'] | null; loading: boolean; error: string | null;
+  query: string; onQuery: (q: string) => void; onRefresh: () => void; onAbout: () => void;
+  actions?: ReactNode;
+}
 
-export default function Header({ meta, loading, error, query, onQuery, onRefresh, onAbout }: Props) {
-  let status = 'Connecting to USGS…';
+export default function Header({ meta, loading, error, query, onQuery, onRefresh, onAbout, actions }: Props) {
+  let status = 'Connecting to event sources…';
   let tone = 'idle';
   if (meta) {
-    if (meta.stale) { status = `Stale data · fetched ${relativeTime(meta.fetchedAt)}`; tone = 'warn'; }
-    else { status = `Live USGS data · fetched ${relativeTime(meta.fetchedAt)}`; tone = 'ok'; }
-  } else if (error) { status = 'USGS data unavailable'; tone = 'bad'; }
+    const ok = meta.providers.filter((p) => p.ok);
+    const oldest = Math.min(...ok.map((p) => p.fetchedAt ?? Date.now()));
+    const names = ok.map((p) => PROVIDERS[p.provider].label).join(' + ');
+    const degraded = meta.providers.some((p) => !p.ok || p.stale || p.partial);
+    status = `${degraded ? 'Partial data' : 'Live data'} · ${names} · fetched ${relativeTime(oldest)}`;
+    tone = degraded ? 'warn' : 'ok';
+  } else if (error) { status = 'Event data unavailable'; tone = 'bad'; }
   return (
     <header className="topbar">
       <div className="brand">
@@ -19,12 +28,13 @@ export default function Header({ meta, loading, error, query, onQuery, onRefresh
       </div>
       <label className="search">
         <Search size={16} aria-hidden="true" />
-        <span className="sr-only">Search events by location</span>
-        <input type="search" value={query} onChange={(e) => onQuery(e.target.value)} placeholder="Search by location or place name" />
+        <span className="sr-only">Search events by name or place</span>
+        <input type="search" value={query} onChange={(e) => onQuery(e.target.value)} placeholder="Search events by name or place" />
       </label>
       <div className="top-actions">
         <div className={`status status-${tone}`} role="status"><span className="dot" aria-hidden="true" />{status}</div>
-        <button type="button" className="icon-btn" onClick={onRefresh} disabled={loading} aria-label="Refresh earthquake data"><RefreshCw size={16} className={loading ? 'spin' : ''} /></button>
+        <button type="button" className="icon-btn" onClick={onRefresh} disabled={loading} aria-label="Refresh event data"><RefreshCw size={16} className={loading ? 'spin' : ''} /></button>
+        {actions}
         <button type="button" className="icon-btn" onClick={onAbout} aria-label="About IMPACT and data sources"><Info size={16} /></button>
       </div>
     </header>

@@ -95,12 +95,66 @@ export async function getEvents(feed: FeedId, opts: { force?: boolean; fetchImpl
   }
 }
 
+// ---- date-range queries (FDSN event service) ----------------------------
+
+export const USGS_QUERY_LIMIT = 20_000;
+const RANGE_FRESH_MS = 2 * 60_000;
+const PAST_RANGE_FRESH_MS = 60 * 60_000;
+const RANGE_CACHE_MAX = 24;
+const BUCKET_MS = 5 * 60_000;
+
+interface RangeEntry { events: QuakeEvent[]; fetchedAt: number }
+const rangeCache = new Map<string, RangeEntry>();
+export const __resetUsgsRangeCache = () => rangeCache.clear();
+
+export interface UsgsRangeResult { events: QuakeEvent[]; fetchedAt: number; stale: boolean }
+
+export function buildRangeUrl(start: number, end: number, minMagnitude: number): string {
+  const u = new URL(USGS_QUERY_URL);
+  u.searchParams.set('format', 'geojson');
+  u.searchParams.set('starttime', new Date(start).toISOString());
+  u.searchParams.set('endtime', new Date(end).toISOString());
+  u.searchParams.set('minmagnitude', String(minMagnitude));
+  u.searchParams.set('orderby', 'time');
+  u.searchParams.set('limit', String(USGS_QUERY_LIMIT));
+  return u.toString();
+}
+
+/**
+ * Earthquakes between two instants at or above a magnitude, via the documented FDSN query API.
+ * Start/end are bucketed to 5 minutes so nearby requests share one cache entry.
+ */
+export async function queryUsgsRange(start: number, end: number, minMagnitude: number, opts: { force?: boolean; fetchImpl?: FetchLike; now?: () => number } = {}): Promise<UsgsRangeResult> {
+  const now = opts.now ?? Date.now;
+  const s = Math.floor(start / BUCKET_MS) * BUCKET_MS;
+  const e = Math.ceil(end / BUCKET_MS) * BUCKET_MS;
+  const key = `${s}:${e}:${minMagnitude}`;
+  const cached = rangeCache.get(key);
+  const freshFor = e < now() - BUCKET_MS ? PAST_RANGE_FRESH_MS : RANGE_FRESH_MS;
+  if (cached && !opts.force && now() - cached.fetchedAt < freshFor) return { ...cached, stale: false };
+  const f = opts.fetchImpl ?? fetch;
+  try {
+    const res = await f(buildRangeUrl(s, e, minMagnitude), { signal: AbortSignal.timeout(25_000), headers: { Accept: 'application/json' } });
+    if (res.status === 400) throw new HttpError(400, 'usgs_query_rejected', 'USGS rejected this query, usually because it matches more than 20,000 events. Raise the minimum magnitude or shorten the range.');
+    if (!res.ok) throw new Error(`USGS responded ${res.status}`);
+    const entry = { events: normalizeFeed(await res.json()).events, fetchedAt: now() };
+    if (rangeCache.size >= RANGE_CACHE_MAX) rangeCache.delete(rangeCache.keys().next().value as string);
+    rangeCache.set(key, entry);
+    return { ...entry, stale: false };
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    log('warn', 'usgs_range_failed', { reason: (err as Error).message });
+    if (cached) return { ...cached, stale: true };
+    throw new HttpError(502, 'upstream_unavailable', 'The USGS earthquake service is unavailable and no earlier data is stored for this range.');
+  }
+}
+
 export const isValidEventId = (id: string) => /^[a-z0-9]{4,40}$/i.test(id);
 
-/** Find an event in any cached feed, else ask USGS for that single event by id. */
+/** Find an event in any cached feed or range, else ask USGS for that single event by id. */
 export async function getEventById(id: string, opts: { fetchImpl?: FetchLike } = {}): Promise<QuakeEvent | null> {
   if (!isValidEventId(id)) throw new HttpError(400, 'invalid_event_id', 'Event id is not valid.');
-  for (const c of cache.values()) {
+  for (const c of [...cache.values(), ...rangeCache.values()]) {
     const hit = c.events.find((e) => e.id === id);
     if (hit) return hit;
   }

@@ -3,10 +3,12 @@ import Stripe from 'stripe';
 import { getConfig } from '../config';
 import { log } from '../logger';
 import { stripeProblem, handleWebhookEvent } from '../services/stripe';
+import { handleDonationWebhook } from '../services/donation';
+import type { DonationStore } from '../services/donationStore';
 import type { EntitlementStore } from '../services/entitlements';
 
 /** Mounted with express.raw() so the signature can be verified against the exact bytes Stripe sent. */
-export const webhookHandler = (store: EntitlementStore): RequestHandler => (req, res) => {
+export const webhookHandler = (store: EntitlementStore, donations: DonationStore): RequestHandler => (req, res) => {
   const cfg = getConfig();
   if (stripeProblem() || !cfg.stripe.webhookSecret) {
     res.status(503).json({ error: { code: 'webhook_not_configured', message: 'Stripe webhook is not configured.' } });
@@ -26,6 +28,7 @@ export const webhookHandler = (store: EntitlementStore): RequestHandler => (req,
     return;
   }
   const result = handleWebhookEvent(event, store);
-  log('info', 'webhook_received', { type: event.type, granted: result.granted });
+  const donation = result.handled ? { updated: false } : handleDonationWebhook(event, donations);
+  log('info', 'webhook_received', { type: event.type, granted: result.granted, donationUpdated: donation.updated });
   res.json({ received: true });
 };

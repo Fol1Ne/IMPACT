@@ -6,6 +6,11 @@ export function formatUtc(ms: number | null): string {
   const d = new Date(ms);
   return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()} ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())} UTC`;
 }
+const LOCAL = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+/** Timestamps are stored in UTC; this renders them in the viewer's own time zone. */
+export function formatLocal(ms: number | null): string {
+  return ms === null ? 'Not reported' : LOCAL.format(new Date(ms));
+}
 export function relativeTime(ms: number | null, now = Date.now()): string {
   if (ms === null) return 'unknown time';
   const s = Math.max(0, Math.round((now - ms) / 1000));
