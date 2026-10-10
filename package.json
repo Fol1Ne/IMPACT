@@ -1,0 +1,22 @@
+{
+  "name": "impact-hackucd",
+  "version": "1.0.0",
+  "private": true,
+  "description": "IMPACT - Global Disaster Intelligence. Humanitarian Action. (HackUCD 2026)",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "install:all": "npm install",
+    "dev": "concurrently -n server,client -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
+    "build": "npm run build -w client",
+    "start": "npm run build && npm run start -w server",
+    "start:prod": "npm run start -w server",
+    "test": "npm run test -w server",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w client"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.6"
+  }
+}
