@@ -21,6 +21,7 @@ export function createApp(deps: AppDeps = {}) {
   const donations = deps.donations ?? new DonationStore(cfg.donationsFile);
   const app = express();
   app.disable('x-powered-by');
+  if (process.env.VERCEL) app.set('trust proxy', 1);
   app.use(helmet({
     contentSecurityPolicy: {
       useDefaults: false,

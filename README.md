@@ -40,6 +40,9 @@ npm run dev               # server :PORT + client :5173 -> open http://localhost
 ```
 The Vite proxy reads `PORT` from `.env`, so you can move the API off 3001 if something else uses it. Single-port mode: set `CLIENT_URL=http://localhost:<PORT>`, then `npm start`.
 
+### Vercel
+The client is a static Vite build; `/api/*` is the Express app as a serverless function (`api/[...path].ts`). Set the same server env vars in the Vercel project. `CLIENT_URL` can be omitted (the deployment URL is used). JSON stores are in-memory on Vercel, so SMS polling and donation records do not survive cold starts.
+
 Other scripts: `npm test` (server tests, all external APIs mocked), `npm run typecheck`, `npm run build`.
 
 ### Environment variables (root `.env`)
